@@ -96,7 +96,9 @@ interface SqlOperations {
         database: JdbcDatabase,
         records: List<PartialAirbyteMessage>,
         schemaName: String?,
-        tableName: String?
+        tableName: String?,
+        syncId: Long,
+        generationId: Long,
     )
 
     /**

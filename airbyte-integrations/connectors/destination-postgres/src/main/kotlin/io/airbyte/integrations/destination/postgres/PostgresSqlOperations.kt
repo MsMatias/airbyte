@@ -6,6 +6,7 @@ package io.airbyte.integrations.destination.postgres
 import io.airbyte.cdk.db.jdbc.JdbcDatabase
 import io.airbyte.cdk.integrations.base.JavaBaseConstants
 import io.airbyte.cdk.integrations.base.TypingAndDedupingFlag.isDestinationV2
+import io.airbyte.cdk.integrations.destination.async.buffers.LOGGER
 import io.airbyte.cdk.integrations.destination.async.model.PartialAirbyteMessage
 import io.airbyte.cdk.integrations.destination.jdbc.JdbcSqlOperations
 import java.io.BufferedReader
@@ -16,7 +17,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.sql.Connection
 import java.sql.SQLException
-import org.apache.commons.lang3.StringUtils
 import org.postgresql.copy.CopyManager
 import org.postgresql.core.BaseConnection
 
@@ -63,18 +63,23 @@ class PostgresSqlOperations : JdbcSqlOperations() {
         database: JdbcDatabase,
         records: List<PartialAirbyteMessage>,
         schemaName: String?,
-        tableName: String?
+        tableName: String?,
+        syncId: Long,
+        generationId: Long,
     ) {
         insertRecordsInternal(
             database,
             records,
             schemaName,
             tableName,
+            syncId,
+            generationId,
             JavaBaseConstants.COLUMN_NAME_AB_RAW_ID,
             JavaBaseConstants.COLUMN_NAME_DATA,
             JavaBaseConstants.COLUMN_NAME_AB_EXTRACTED_AT,
             JavaBaseConstants.COLUMN_NAME_AB_LOADED_AT,
-            JavaBaseConstants.COLUMN_NAME_AB_META
+            JavaBaseConstants.COLUMN_NAME_AB_META,
+            JavaBaseConstants.COLUMN_NAME_AB_GENERATION_ID,
         )
     }
 
@@ -83,13 +88,17 @@ class PostgresSqlOperations : JdbcSqlOperations() {
         database: JdbcDatabase,
         records: List<PartialAirbyteMessage>,
         schemaName: String?,
-        tmpTableName: String?
+        tmpTableName: String?,
+        syncId: Long,
+        generationId: Long,
     ) {
         insertRecordsInternal(
             database,
             records,
             schemaName,
             tmpTableName,
+            syncId,
+            generationId,
             JavaBaseConstants.COLUMN_NAME_AB_ID,
             JavaBaseConstants.COLUMN_NAME_DATA,
             JavaBaseConstants.COLUMN_NAME_EMITTED_AT,
@@ -102,19 +111,26 @@ class PostgresSqlOperations : JdbcSqlOperations() {
         records: List<PartialAirbyteMessage>,
         schemaName: String?,
         tmpTableName: String?,
-        vararg columnNames: String
+        syncId: Long,
+        generationId: Long,
+        vararg recordDependentColumns: String,
     ) {
         if (records.isEmpty()) {
             return
         }
         // Explicitly passing column order to avoid order mismatches between CREATE TABLE and COPY
         // statement
-        val orderedColumnNames = StringUtils.join(columnNames, ", ")
+        //val orderedConstantColumnNames = constantColumnToValue.keys.toList()
+        val orderedColumnNames = recordDependentColumns.toList()// + orderedConstantColumnNames
+        /*val orderedConstantColumnValues =
+            orderedConstantColumnNames.map { constantColumnToValue.getValue(it) }*/
         database.execute { connection: Connection ->
             var tmpFile: File? = null
             try {
                 tmpFile = Files.createTempFile("$tmpTableName-", ".tmp").toFile()
-                writeBatchToFile(tmpFile, records)
+                writeBatchToFile(tmpFile, records, syncId, generationId)
+                LOGGER.info { "SGX tempFile = ${Files.readString(tmpFile.toPath())}" }
+                RuntimeException().printStackTrace()
 
                 val copyManager = CopyManager(connection.unwrap(BaseConnection::class.java))
                 val sql =
@@ -122,8 +138,9 @@ class PostgresSqlOperations : JdbcSqlOperations() {
                         "COPY %s.%s (%s) FROM stdin DELIMITER ',' CSV",
                         schemaName,
                         tmpTableName,
-                        orderedColumnNames
+                        orderedColumnNames.joinToString(", ")
                     )
+                LOGGER.info { "executing COPY command: $sql" }
                 val bufferedReader = BufferedReader(FileReader(tmpFile, StandardCharsets.UTF_8))
                 copyManager.copyIn(sql, bufferedReader)
             } catch (e: Exception) {

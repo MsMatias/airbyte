@@ -16,6 +16,8 @@ import java.time.Instant
 import java.util.Optional
 import java.util.stream.Stream
 
+private val LOGGER = KotlinLogging.logger {}
+
 abstract class AbstractStreamOperation<DestinationState : MinimumDestinationState, Data>(
     private val storageOperation: StorageOperation<Data>,
     destinationInitialStatus: DestinationInitialStatus<DestinationState>,
@@ -221,6 +223,7 @@ abstract class AbstractStreamOperation<DestinationState : MinimumDestinationStat
     }
 
     override fun writeRecords(streamConfig: StreamConfig, stream: Stream<PartialAirbyteMessage>) {
+        LOGGER.info { "SGX this.impl=${this.javaClass}, streamConfig=${streamConfig}" }
         // redirect to the appropriate raw table (potentially the temp raw table).
         writeRecordsImpl(
             streamConfig,
